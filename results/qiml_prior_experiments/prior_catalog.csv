@@ -1,0 +1,7 @@
+candidate,value_kind,mode,n_bins,n_groups,description
+global_rating,rating,batch,5,1,
+global_residual,residual,batch,16,1,
+global_dot,dot,batch,32,1,P(p_u dot q_i)
+cond_activity_popularity,residual,sample,16,16,"P(E | user activity bin, item popularity bin)"
+cond_user_genre,residual,sample,16,324,"P(E | residual-lift user genre type, movie primary genre)"
+cond_user_itemtype,residual,sample,16,192,"P(E | residual user cluster, item-type cluster)"

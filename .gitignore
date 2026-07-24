@@ -1,0 +1,14 @@
+.DS_Store
+__pycache__/
+*.py[cod]
+*.so
+
+.ipynb_checkpoints/
+.cursor/
+
+.venv/
+venv/
+env/
+
+# Local datasets are intentionally not uploaded.
+data/

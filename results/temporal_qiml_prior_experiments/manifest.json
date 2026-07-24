@@ -1,0 +1,53 @@
+{
+  "created_at": "2026-07-21 23:56:22",
+  "n_train": 70187,
+  "n_val": 9560,
+  "n_test": 10736,
+  "n_users": 943,
+  "n_items": 1612,
+  "window": 10,
+  "feature_cols": [
+    "x_seq_pos_norm",
+    "x_recent_mean_residual",
+    "x_recent_std_residual",
+    "x_recent_mean_rating_centered",
+    "x_recent_positive_rate",
+    "x_recent_genre_score",
+    "x_prev_residual",
+    "x_log_gap"
+  ],
+  "config": {
+    "data_dir": "data/ml-100k",
+    "out_dir": "results/temporal_qiml_prior_experiments",
+    "seeds": [
+      0,
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7,
+      8,
+      9
+    ],
+    "epochs": 20,
+    "factors": 50,
+    "batch_size": 1024,
+    "lr": 0.003,
+    "l2": 1e-05,
+    "lambda_kl": 0.01,
+    "lambda_mmd": 0.05,
+    "lambda_peak": 0.0,
+    "soft_tau": 0.25,
+    "window": 10,
+    "residual_bins": 16,
+    "delta_bins": 16,
+    "state_clusters": 12,
+    "item_clusters": 16,
+    "gap_bins": 4,
+    "top_k": 10,
+    "max_candidates": null,
+    "windows": null
+  }
+}

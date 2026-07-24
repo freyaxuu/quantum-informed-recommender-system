@@ -1,0 +1,11 @@
+matplotlib==3.10.9
+numpy==2.4.6
+pandas==3.0.3
+pennylane==0.45.0
+pennylane-lightning==0.45.0
+scikit-learn==1.9.0
+scikit-surprise==1.1.5
+torch==2.11.0
+
+# Used by notebooks/circuit_visualization.ipynb.
+qiskit>=1.0

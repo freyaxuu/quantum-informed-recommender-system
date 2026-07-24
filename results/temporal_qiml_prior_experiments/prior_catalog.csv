@@ -1,0 +1,5 @@
+candidate,value_kind,n_groups,n_bins,description
+temporal_global_residual,residual,1,16,
+temporal_next_residual,residual,192,16,"P(E_t | S_{t-1}, item_type_t)"
+temporal_delta_residual,delta_residual,3072,16,"P(delta E_t | E_{t-1 bin}, S_{t-1}, item_type_t)"
+temporal_gap_residual,residual,768,16,"P(E_t | gap_bucket, S_{t-1}, item_type_t)"
