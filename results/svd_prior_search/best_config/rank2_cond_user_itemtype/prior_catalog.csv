@@ -1,0 +1,2 @@
+candidate,value_kind,mode,n_bins,n_groups,description
+cond_user_itemtype,residual,sample,16,576,"P(E | user_cluster k=24, item_cluster k=24)"

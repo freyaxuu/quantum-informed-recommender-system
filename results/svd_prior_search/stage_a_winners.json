@@ -1,0 +1,6 @@
+{
+  "user_clusters": 24,
+  "item_clusters": 24,
+  "time_promising": true,
+  "time_scheme": "weekday_weekend"
+}

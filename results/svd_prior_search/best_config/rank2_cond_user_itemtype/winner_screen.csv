@@ -1,0 +1,2 @@
+candidate,mean_rmse_gain,mean_dist_kl,shuffled_rmse_gain,shuffled_dist_kl,beats_shuffled_rmse,beats_shuffled_dist,meaningful_candidate
+cond_user_itemtype,0.0009590666457446661,0.3382751992230031,0.0008725954700051552,0.3524170468746844,True,True,True

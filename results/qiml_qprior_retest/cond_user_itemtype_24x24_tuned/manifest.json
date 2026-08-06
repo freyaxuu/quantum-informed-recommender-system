@@ -1,0 +1,49 @@
+{
+  "created_at": "2026-08-06 16:46:47",
+  "candidate": "cond_user_itemtype",
+  "data_dir": "data/ml-100k",
+  "n_train": 79619,
+  "n_val": 9558,
+  "n_test": 10736,
+  "n_users": 943,
+  "n_items": 1612,
+  "empirical_prior": "results/svd_prior_search/best_config/rank2_cond_user_itemtype/priors/cond_user_itemtype.npz",
+  "qcbm_prior": "models/qprior_winning/cond_user_itemtype_24x24_tuned/qcbm_prior.npy",
+  "finite_shot_prior": "models/qprior_winning/cond_user_itemtype_24x24_tuned/qcbm_prior_finite_shots.npy",
+  "prior_shape": [
+    576,
+    16
+  ],
+  "config": {
+    "data_dir": "data/ml-100k",
+    "out_dir": "results/qiml_qprior_retest/cond_user_itemtype_24x24_tuned",
+    "seeds": [
+      0,
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7,
+      8,
+      9
+    ],
+    "epochs": 20,
+    "factors": 20,
+    "batch_size": 1024,
+    "lr": 0.001,
+    "l2": 0.0001,
+    "lambda_kl": 0.03,
+    "lambda_mmd": 0.1,
+    "lambda_peak": 0.0,
+    "soft_tau": 0.15,
+    "residual_bins": 16,
+    "dot_bins": 32,
+    "user_clusters": 24,
+    "item_clusters": 24,
+    "top_k": 10,
+    "max_candidates": null,
+    "include_oracle": false
+  }
+}

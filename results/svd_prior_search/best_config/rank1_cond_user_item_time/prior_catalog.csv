@@ -1,0 +1,2 @@
+candidate,value_kind,mode,n_bins,n_groups,description
+cond_user_item_time,residual,sample,16,1152,"P(E | user_cluster k=24, item_cluster k=24, time=weekday_weekend)"

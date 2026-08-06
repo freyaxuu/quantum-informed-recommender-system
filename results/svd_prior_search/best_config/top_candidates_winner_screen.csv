@@ -1,0 +1,4 @@
+rank,config_dir,candidate,mean_rmse_gain,mean_dist_kl,shuffled_rmse_gain,shuffled_dist_kl,beats_shuffled_rmse,beats_shuffled_dist,meaningful_candidate,factors,lr,l2,lambda_kl,lambda_mmd,soft_tau
+1,results/svd_prior_search/best_config/rank1_cond_user_item_time,cond_user_item_time,0.0009922387146697,0.3405125395171956,0.0008793581697862,0.3487837105329323,True,True,True,20,0.001,0.0001,0.03,0.1,0.15
+2,results/svd_prior_search/best_config/rank2_cond_user_itemtype,cond_user_itemtype,0.0009590666457446,0.3382751992230031,0.0008725954700051,0.3524170468746844,True,True,True,20,0.001,0.0001,0.03,0.1,0.15
+3,results/svd_prior_search/best_config/rank3_cond_user_item_time,cond_user_item_time,0.000806436014476,0.2921944607598627,0.0007288462234477,0.2995451784494478,True,True,True,20,0.001,0.0001,0.03,0.1,0.25

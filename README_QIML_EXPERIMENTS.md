@@ -59,6 +59,42 @@ The loss uses KL plus MMD-style L2 distribution matching. This replaces the
 notebook's pure cross-entropy residual prior so the diagnostic measures true
 distribution alignment instead of only mode-seeking behavior.
 
+## Stage 1.5: SVD tabulation and grouping/time hyperparameter search
+
+Before extending Stage 1, tabulate the plain (no-prior) SVD/MF model across
+its own hyperparameters, then run a staged search over user/item cluster
+count, a new time-of-day / weekday-weekend grouping axis, and the prior-loss
+weights:
+
+```bash
+python3 svd_prior_search.py --quick   # smoke test, all stages
+python3 svd_prior_search.py --stage baseline   # standard SVD tabulation
+python3 svd_prior_search.py --stage a          # cheap grouping/time axis screen
+python3 svd_prior_search.py --stage b          # loss-weight tuning on the axis winners
+python3 svd_prior_search.py --stage c          # full 10-seed x 4-variant confirmation
+```
+
+Stages `a`/`b`/`c` resume from `results/svd_baseline_grid/summary.csv` and
+`results/svd_prior_search/search_log.csv` on disk, so they can be run in
+separate invocations. Outputs:
+
+- `results/svd_baseline_grid/{metrics,summary}.csv`: the standard SVD
+  tabulation (sorted by mean test RMSE).
+- `results/svd_prior_search/search_log.csv`: every screened config across
+  stages A and B, with the same `meaningful_candidate` bar used in
+  `winner_screen.csv` (beats shuffled on both RMSE gain and distribution KL).
+- `results/svd_prior_search/stage_a_winners.json`: the grouping/time axis
+  winners carried into Stage B.
+- `results/svd_prior_search/best_config/`: full `metrics.csv`/`summary.csv`/
+  `winner_screen.csv` for the top Stage-B configs, re-evaluated against all
+  four variants (real/shuffled/uniform/random), plus
+  `top_candidates_winner_screen.csv` comparing them.
+
+See `HANDOFF.md`'s "Stage 1.5" section for the latest result: with a tuned
+SVD baseline, `cond_user_itemtype` at finer grouping is the first config to
+beat shuffled, uniform, and random simultaneously, though the margin is
+still small.
+
 ## Stage 2: QCBM for a winning prior
 
 Only run this after `winner_screen.csv` identifies a meaningful prior.
