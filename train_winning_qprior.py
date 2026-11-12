@@ -12,6 +12,7 @@ from __future__ import annotations
 import argparse
 import json
 import math
+import time
 from pathlib import Path
 
 import numpy as np
@@ -87,6 +88,9 @@ def fit_qcbm(target, n_qubits, layers, epochs, lr, seed):
     model = QCBM()
     opt = torch.optim.Adam(model.parameters(), lr=lr)
     history = []
+    best_epoch = -1
+    best_loss = math.inf
+    best_state = None
     for epoch in range(1, epochs + 1):
         opt.zero_grad()
         pred = model()
@@ -96,13 +100,41 @@ def fit_qcbm(target, n_qubits, layers, epochs, lr, seed):
         loss = kl + mmd_l2
         loss.backward()
         opt.step()
-        history.append({"epoch": epoch, "loss": float(loss.detach()), "kl": float(kl.detach()), "mmd_l2": float(mmd_l2.detach())})
+
+        # Score and checkpoint the parameters *after* the optimizer update.
+        # The previous implementation logged the pre-update objective and then
+        # unconditionally saved the final parameters.
+        with torch.no_grad():
+            post_pred = model()
+            post_kl = torch.sum(post_pred * torch.log((post_pred + eps) / (target_t + eps)))
+            post_mmd_l2 = torch.sum((post_pred - target_t) ** 2)
+            post_loss = post_kl + post_mmd_l2
+        post_loss_value = float(post_loss.detach())
+        if post_loss_value < best_loss:
+            best_epoch = epoch
+            best_loss = post_loss_value
+            best_state = {k: v.detach().clone() for k, v in model.state_dict().items()}
+        history.append(
+            {
+                "epoch": epoch,
+                "loss": post_loss_value,
+                "kl": float(post_kl.detach()),
+                "mmd_l2": float(post_mmd_l2.detach()),
+                "selected": False,
+            }
+        )
         if epoch == 1 or epoch % 50 == 0:
             print(f"epoch {epoch:04d} loss={history[-1]['loss']:.8f} kl={history[-1]['kl']:.8f}")
 
+    if best_state is None:
+        raise RuntimeError("QCBM training produced no checkpoint; epochs must be at least 1.")
+    model.load_state_dict(best_state)
+    for row in history:
+        row["selected"] = row["epoch"] == best_epoch
     learned = model().detach().numpy()
     state_dict = {k: v.detach().numpy() for k, v in model.state_dict().items()}
-    return learned, state_dict, history
+    selection = {"best_epoch": best_epoch, "best_loss": best_loss}
+    return learned, state_dict, history, selection
 
 
 def finite_shot_distribution(probs, shots, seed):
@@ -138,7 +170,9 @@ def main():
 
     target, meta = flatten_prior(args.prior)
     n_qubits = args.n_qubits or math.ceil(math.log2(len(target)))
-    learned, state_dict, history = fit_qcbm(target, n_qubits, args.layers, args.epochs, args.lr, args.seed)
+    learned, state_dict, history, selection = fit_qcbm(
+        target, n_qubits, args.layers, args.epochs, args.lr, args.seed
+    )
     shot_dist = finite_shot_distribution(learned, args.shots, args.seed)
 
     args.out_dir.mkdir(parents=True, exist_ok=True)
@@ -148,12 +182,15 @@ def main():
     np.savez_compressed(args.out_dir / "qcbm_state.npz", **state_dict)
 
     report = {
+        "created_at": time.strftime("%Y-%m-%d %H:%M:%S"),
         **meta,
         "n_states": len(target),
         "n_qubits": n_qubits,
         "layers": args.layers,
         "trainable_parameters": args.layers * n_qubits * 3,
         "shots": args.shots,
+        "checkpoint_policy": "lowest post-update KL+L2 fitting loss",
+        **selection,
         "qcbm_vs_empirical": dist_metrics(learned, target),
         "finite_shot_vs_empirical": dist_metrics(shot_dist, target),
         "history": history,

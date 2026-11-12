@@ -69,6 +69,21 @@ class ExperimentConfig:
     include_oracle: bool
 
 
+@dataclass
+class StaticProtocolSplits:
+    """Four chronological partitions used by the corrected static protocol.
+
+    ``checkpoint_val`` selects the epoch for each individual training run,
+    ``selection_val`` selects model/prior hyperparameters, and ``confirmation``
+    is reserved for the one-shot final comparison.
+    """
+
+    train: pd.DataFrame
+    checkpoint_val: pd.DataFrame
+    selection_val: pd.DataFrame
+    confirmation: pd.DataFrame
+
+
 class MatrixFactorization:
     """Small explicit-feedback MF model trained with NumPy Adam."""
 
@@ -281,6 +296,44 @@ def temporal_split(df: pd.DataFrame, train_ratio: float = 0.8, val_ratio: float 
     return train, val, test
 
 
+def static_protocol_split(
+    df: pd.DataFrame,
+    train_ratio: float = 0.7,
+    checkpoint_val_ratio: float = 0.1,
+    selection_val_ratio: float = 0.1,
+) -> StaticProtocolSplits:
+    """Make disjoint per-user chronological splits for the static pipeline.
+
+    The remaining fraction is the confirmation holdout.  Keeping epoch
+    selection and hyperparameter selection separate avoids adapting both to
+    the same validation observations, while the confirmation rows are never
+    needed by a search-stage training or scoring function.
+    """
+
+    ratios = (train_ratio, checkpoint_val_ratio, selection_val_ratio)
+    if any(r <= 0.0 for r in ratios) or sum(ratios) >= 1.0:
+        raise ValueError("Static protocol ratios must be positive and sum to less than 1.")
+
+    parts = {"train": [], "checkpoint_val": [], "selection_val": [], "confirmation": []}
+    for user_id, user_df in df.sort_values("timestamp").groupby("user_id", sort=False):
+        n = len(user_df)
+        if n < 4:
+            raise ValueError(f"User {user_id} has only {n} rows; four protocol splits require at least 4.")
+        n_train = min(max(1, int(n * train_ratio)), n - 3)
+        n_checkpoint = min(max(1, int(n * checkpoint_val_ratio)), n - n_train - 2)
+        n_selection = min(max(1, int(n * selection_val_ratio)), n - n_train - n_checkpoint - 1)
+        checkpoint_end = n_train + n_checkpoint
+        selection_end = checkpoint_end + n_selection
+        parts["train"].append(user_df.iloc[:n_train])
+        parts["checkpoint_val"].append(user_df.iloc[n_train:checkpoint_end])
+        parts["selection_val"].append(user_df.iloc[checkpoint_end:selection_end])
+        parts["confirmation"].append(user_df.iloc[selection_end:])
+
+    return StaticProtocolSplits(
+        **{name: pd.concat(frames).reset_index(drop=True) for name, frames in parts.items()}
+    )
+
+
 def load_movielens(data_dir: Path):
     ratings = pd.read_csv(
         data_dir / "u.data",
@@ -311,6 +364,29 @@ def add_indices(train: pd.DataFrame, val: pd.DataFrame, test: pd.DataFrame):
         return out.reset_index(drop=True)
 
     return map_known(train), map_known(val), map_known(test), user_to_idx, item_to_idx
+
+
+def add_indices_to_protocol(splits: StaticProtocolSplits):
+    """Index all protocol splits using identifiers learned from training only."""
+
+    user_ids = sorted(splits.train["user_id"].unique())
+    item_ids = sorted(splits.train["item_id"].unique())
+    user_to_idx = {u: i for i, u in enumerate(user_ids)}
+    item_to_idx = {i: j for j, i in enumerate(item_ids)}
+
+    def map_known(df: pd.DataFrame) -> pd.DataFrame:
+        out = df[df["user_id"].isin(user_to_idx) & df["item_id"].isin(item_to_idx)].copy()
+        out["user_idx"] = out["user_id"].map(user_to_idx).astype(np.int64)
+        out["item_idx"] = out["item_id"].map(item_to_idx).astype(np.int64)
+        return out.reset_index(drop=True)
+
+    indexed = StaticProtocolSplits(
+        train=map_known(splits.train),
+        checkpoint_val=map_known(splits.checkpoint_val),
+        selection_val=map_known(splits.selection_val),
+        confirmation=map_known(splits.confirmation),
+    )
+    return indexed, user_to_idx, item_to_idx
 
 
 def fit_stat_biases(train: pd.DataFrame, mu: float):
@@ -725,6 +801,9 @@ def train_model(
     bu_stat = train["bu_stat"].to_numpy(np.float64)
     bi_stat = train["bi_stat"].to_numpy(np.float64)
 
+    best_model: Optional[MatrixFactorization] = None
+    best_val_rmse = np.inf
+    best_epoch = -1
     for epoch in range(1, cfg.epochs + 1):
         order = rng.permutation(n)
         epoch_mse = []
@@ -778,9 +857,19 @@ def train_model(
             "val_rmse": val_metrics["rmse"],
             "val_mae": val_metrics["mae"],
             "val_clipped_rmse": val_metrics["clipped_rmse"],
+            "selected": False,
         }
         history.append(row)
-    return model, pd.DataFrame(history)
+        if val_metrics["rmse"] < best_val_rmse:
+            best_val_rmse = val_metrics["rmse"]
+            best_epoch = epoch
+            best_model = model.copy()
+
+    if best_model is None:
+        raise RuntimeError("Training produced no checkpoint; epochs must be at least 1.")
+    history_df = pd.DataFrame(history)
+    history_df["selected"] = history_df["epoch"] == best_epoch
+    return best_model, history_df
 
 
 def rating_metrics(model: MatrixFactorization, df: pd.DataFrame):
@@ -909,15 +998,21 @@ def build_dot_prior_from_model(model: MatrixFactorization, train: pd.DataFrame, 
 def run_campaign(cfg: ExperimentConfig):
     cfg.out_dir.mkdir(parents=True, exist_ok=True)
     ratings, items = load_movielens(cfg.data_dir)
-    train, val, test = temporal_split(ratings)
-    train, val, test, user_to_idx, item_to_idx = add_indices(train, val, test)
+    splits, user_to_idx, item_to_idx = add_indices_to_protocol(static_protocol_split(ratings))
+    train = splits.train
+    checkpoint_val = splits.checkpoint_val
+    selection_val = splits.selection_val
     mu = float(train["rating"].mean())
     stat_user_bias, stat_item_bias = fit_stat_biases(train, mu)
     train = add_stat_columns(train, stat_user_bias, stat_item_bias, mu)
-    val = add_stat_columns(val, stat_user_bias, stat_item_bias, mu)
-    test = add_stat_columns(test, stat_user_bias, stat_item_bias, mu)
+    checkpoint_val = add_stat_columns(checkpoint_val, stat_user_bias, stat_item_bias, mu)
+    selection_val = add_stat_columns(selection_val, stat_user_bias, stat_item_bias, mu)
 
-    specs = build_prior_specs(cfg, train, val, test, items, user_to_idx, item_to_idx)
+    # Candidate discovery is validation-only.  The confirmation frame is not
+    # passed to prior construction, training, or metric functions.
+    specs = build_prior_specs(
+        cfg, train, checkpoint_val, selection_val, items, user_to_idx, item_to_idx
+    )
     metrics_rows = []
     history_rows = []
     subgroup_rows = []
@@ -925,10 +1020,14 @@ def run_campaign(cfg: ExperimentConfig):
 
     manifest = {
         "created_at": time.strftime("%Y-%m-%d %H:%M:%S"),
+        "protocol_version": "static_v1_corrected_nested_validation",
+        "selection_policy": "checkpoint_val selects epochs; selection_val screens candidates",
+        "confirmation_metrics_accessed": False,
         "data_dir": str(cfg.data_dir),
         "n_train": len(train),
-        "n_val": len(val),
-        "n_test": len(test),
+        "n_checkpoint_val": len(checkpoint_val),
+        "n_selection_val": len(selection_val),
+        "n_confirmation": len(splits.confirmation),
         "n_users": len(user_to_idx),
         "n_items": len(item_to_idx),
         "config": vars(cfg) | {"data_dir": str(cfg.data_dir), "out_dir": str(cfg.out_dir)},
@@ -939,12 +1038,26 @@ def run_campaign(cfg: ExperimentConfig):
         print(f"\n=== seed {seed} ===")
         initial = MatrixFactorization(len(user_to_idx), len(item_to_idx), cfg.factors, mu, seed)
         baseline = initial.copy()
-        baseline, base_hist = train_model(baseline, train, val, cfg, prior=None, seed=seed)
-        base_metrics = collect_all_metrics("baseline", "none", seed, baseline, train, val, test, None, cfg, len(item_to_idx))
+        baseline, base_hist = train_model(
+            baseline, train, checkpoint_val, cfg, prior=None, seed=seed
+        )
+        base_metrics = collect_all_metrics(
+            "baseline",
+            "none",
+            seed,
+            baseline,
+            train,
+            checkpoint_val,
+            selection_val,
+            None,
+            cfg,
+            len(item_to_idx),
+            evaluation_name="selection",
+        )
         metrics_rows.append(base_metrics)
         for _, row in base_hist.iterrows():
             history_rows.append({"seed": seed, "candidate": "none", "variant": "baseline", **row.to_dict()})
-        sg = subgroup_metrics(baseline, train, test)
+        sg = subgroup_metrics(baseline, train, selection_val)
         sg["seed"] = seed
         sg["candidate"] = "none"
         sg["variant"] = "baseline"
@@ -966,13 +1079,27 @@ def run_campaign(cfg: ExperimentConfig):
             ]
             for variant, prior in variants:
                 model = initial.copy()
-                model, hist = train_model(model, train, val, cfg, prior=prior, seed=seed)
+                model, hist = train_model(
+                    model, train, checkpoint_val, cfg, prior=prior, seed=seed
+                )
                 metrics_rows.append(
-                    collect_all_metrics(variant, spec.name, seed, model, train, val, test, spec, cfg, len(item_to_idx))
+                    collect_all_metrics(
+                        variant,
+                        spec.name,
+                        seed,
+                        model,
+                        train,
+                        checkpoint_val,
+                        selection_val,
+                        spec,
+                        cfg,
+                        len(item_to_idx),
+                        evaluation_name="selection",
+                    )
                 )
                 for _, row in hist.iterrows():
                     history_rows.append({"seed": seed, "candidate": spec.name, "variant": variant, **row.to_dict()})
-                sg = subgroup_metrics(model, train, test)
+                sg = subgroup_metrics(model, train, selection_val)
                 sg["seed"] = seed
                 sg["candidate"] = spec.name
                 sg["variant"] = variant
@@ -984,7 +1111,7 @@ def run_campaign(cfg: ExperimentConfig):
         pd.DataFrame(history_rows).to_csv(cfg.out_dir / "history.csv", index=False)
         pd.DataFrame(subgroup_rows).to_csv(cfg.out_dir / "subgroups.csv", index=False)
         pd.DataFrame(prior_rows).drop_duplicates("candidate").to_csv(cfg.out_dir / "prior_catalog.csv", index=False)
-        summarize_results(cfg.out_dir)
+        summarize_results(cfg.out_dir, evaluation_name="selection")
 
     return cfg.out_dir
 
@@ -1000,11 +1127,16 @@ def collect_all_metrics(
     prior: Optional[PriorSpec],
     cfg: ExperimentConfig,
     n_items: int,
+    evaluation_name: str = "test",
 ):
     row = {"seed": seed, "candidate": candidate, "variant": variant}
     row.update({f"val_{k}": v for k, v in rating_metrics(model, val).items()})
-    row.update({f"test_{k}": v for k, v in rating_metrics(model, test).items()})
-    row.update(ranking_metrics(model, train, test, n_items, cfg.top_k))
+    row.update({f"{evaluation_name}_{k}": v for k, v in rating_metrics(model, test).items()})
+    ranking = ranking_metrics(model, train, test, n_items, cfg.top_k)
+    if evaluation_name == "test":
+        row.update(ranking)
+    else:
+        row.update({f"{evaluation_name}_{k}": v for k, v in ranking.items()})
     if prior is not None:
         pred, dot = model.predict(test["user_idx"].to_numpy(np.int64), test["item_idx"].to_numpy(np.int64), True)
         if prior.value_kind == "rating":
@@ -1014,7 +1146,8 @@ def collect_all_metrics(
         else:
             values = dot
         dist = distribution_metrics(values, prior, test, cfg)
-        row.update({f"dist_{k}": v for k, v in dist.items()})
+        dist_prefix = "dist" if evaluation_name == "test" else f"{evaluation_name}_dist"
+        row.update({f"{dist_prefix}_{k}": v for k, v in dist.items()})
     return row
 
 
@@ -1042,46 +1175,74 @@ def save_prior_spec(spec: PriorSpec, out_dir: Path):
     )
 
 
-def summarize_results(out_dir: Path):
+def summarize_results(out_dir: Path, evaluation_name: str = "test"):
     metrics_path = out_dir / "metrics.csv"
     if not metrics_path.exists():
         return
     df = pd.read_csv(metrics_path)
-    base = df[df["variant"] == "baseline"][["seed", "test_rmse", "dist_kl"]].rename(
-        columns={"test_rmse": "baseline_test_rmse", "dist_kl": "baseline_dist_kl"}
+    rmse_col = f"{evaluation_name}_rmse"
+    dist_prefix = "dist" if evaluation_name == "test" else f"{evaluation_name}_dist"
+    dist_kl_col = f"{dist_prefix}_kl"
+    dist_js_col = f"{dist_prefix}_js"
+    dist_mmd_col = f"{dist_prefix}_mmd_l2"
+    recall_col = "recall_at_k" if evaluation_name == "test" else f"{evaluation_name}_recall_at_k"
+    ndcg_col = "ndcg_at_k" if evaluation_name == "test" else f"{evaluation_name}_ndcg_at_k"
+    base = df[df["variant"] == "baseline"][["seed", rmse_col]].rename(
+        columns={rmse_col: "baseline_evaluation_rmse"}
     )
     prior = df[df["variant"].isin(["real_prior", "shuffled_prior", "uniform_prior", "random_prior"])].copy()
-    prior = prior.merge(base[["seed", "baseline_test_rmse"]], on="seed", how="left")
-    prior["rmse_gain_vs_baseline"] = prior["baseline_test_rmse"] - prior["test_rmse"]
+    prior = prior.merge(base, on="seed", how="left")
+    prior["rmse_gain_vs_baseline"] = prior["baseline_evaluation_rmse"] - prior[rmse_col]
     summary = (
         prior.groupby(["candidate", "variant"], dropna=False)
         .agg(
             seeds=("seed", "nunique"),
-            mean_test_rmse=("test_rmse", "mean"),
-            std_test_rmse=("test_rmse", "std"),
+            mean_evaluation_rmse=(rmse_col, "mean"),
+            std_evaluation_rmse=(rmse_col, "std"),
             mean_rmse_gain=("rmse_gain_vs_baseline", "mean"),
-            mean_dist_kl=("dist_kl", "mean"),
-            mean_dist_js=("dist_js", "mean"),
-            mean_dist_mmd=("dist_mmd_l2", "mean"),
-            mean_recall_at_k=("recall_at_k", "mean"),
-            mean_ndcg_at_k=("ndcg_at_k", "mean"),
+            mean_dist_kl=(dist_kl_col, "mean"),
+            mean_dist_js=(dist_js_col, "mean"),
+            mean_dist_mmd=(dist_mmd_col, "mean"),
+            mean_recall_at_k=(recall_col, "mean"),
+            mean_ndcg_at_k=(ndcg_col, "mean"),
         )
         .reset_index()
     )
+    summary.insert(2, "evaluation_split", evaluation_name)
     summary.to_csv(out_dir / "summary.csv", index=False)
 
-    real = summary[summary["variant"] == "real_prior"][["candidate", "mean_rmse_gain", "mean_dist_kl"]]
-    shuf = summary[summary["variant"] == "shuffled_prior"][["candidate", "mean_rmse_gain", "mean_dist_kl"]].rename(
-        columns={"mean_rmse_gain": "shuffled_rmse_gain", "mean_dist_kl": "shuffled_dist_kl"}
-    )
+    real = summary[summary["variant"] == "real_prior"][
+        ["candidate", "mean_rmse_gain", "mean_dist_kl"]
+    ]
     if not real.empty:
-        winners = real.merge(shuf, on="candidate", how="left")
-        winners["beats_shuffled_rmse"] = winners["mean_rmse_gain"] > winners["shuffled_rmse_gain"].fillna(-np.inf)
-        winners["beats_shuffled_dist"] = winners["mean_dist_kl"] < winners["shuffled_dist_kl"].fillna(np.inf)
+        winners = real.copy()
+        for null_variant in ("shuffled_prior", "uniform_prior", "random_prior"):
+            short = null_variant.removesuffix("_prior")
+            null = summary[summary["variant"] == null_variant][
+                ["candidate", "mean_rmse_gain", "mean_dist_kl"]
+            ].rename(
+                columns={
+                    "mean_rmse_gain": f"{short}_rmse_gain",
+                    "mean_dist_kl": f"{short}_dist_kl",
+                }
+            )
+            winners = winners.merge(null, on="candidate", how="left")
+            winners[f"beats_{short}_rmse"] = winners["mean_rmse_gain"] > winners[
+                f"{short}_rmse_gain"
+            ].fillna(-np.inf)
+            winners[f"beats_{short}_dist"] = winners["mean_dist_kl"] < winners[
+                f"{short}_dist_kl"
+            ].fillna(np.inf)
+        winners["beats_all_nulls_rmse"] = winners[
+            ["beats_shuffled_rmse", "beats_uniform_rmse", "beats_random_rmse"]
+        ].all(axis=1)
+        winners["beats_all_nulls_dist"] = winners[
+            ["beats_shuffled_dist", "beats_uniform_dist", "beats_random_dist"]
+        ].all(axis=1)
         winners["meaningful_candidate"] = (
-            winners["beats_shuffled_rmse"]
-            & winners["beats_shuffled_dist"]
-            & (winners["mean_rmse_gain"] >= -0.002)
+            winners["beats_all_nulls_rmse"]
+            & winners["beats_all_nulls_dist"]
+            & (winners["mean_rmse_gain"] > 0.0)
         )
         winners.sort_values(["meaningful_candidate", "mean_dist_kl", "mean_rmse_gain"], ascending=[False, True, False]).to_csv(
             out_dir / "winner_screen.csv", index=False
@@ -1091,7 +1252,11 @@ def summarize_results(out_dir: Path):
 def parse_args():
     parser = argparse.ArgumentParser(description="Run prior-first QIML recommender experiments.")
     parser.add_argument("--data_dir", type=Path, default=Path("data/ml-100k"))
-    parser.add_argument("--out_dir", type=Path, default=Path("results/qiml_prior_experiments"))
+    parser.add_argument(
+        "--out_dir",
+        type=Path,
+        default=Path("results/static_v1_corrected/prior_discovery"),
+    )
     parser.add_argument("--seeds", type=str, default="0,1,2,3,4,5,6,7,8,9")
     parser.add_argument("--epochs", type=int, default=20)
     parser.add_argument("--factors", type=int, default=50)

@@ -1,0 +1,68 @@
+{
+  "verification_date": "2026-11-12",
+  "runtime": {
+    "python": "3.12.14",
+    "numpy": "2.3.5",
+    "pandas": "2.2.3"
+  },
+  "source": "Focused snapshot of local corrected static-v1 scripts; no experimental logic changed for this publication.",
+  "mf_replay": {
+    "runs": 70,
+    "seeds": [
+      0,
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7,
+      8,
+      9
+    ],
+    "variants": [
+      "baseline",
+      "empirical_prior",
+      "finite_shot_qcbm_prior",
+      "qcbm_prior",
+      "random_prior",
+      "shuffled_prior",
+      "uniform_prior"
+    ],
+    "all_numeric_metrics_match_atol": 1e-12,
+    "all_selected_epochs_match": true,
+    "maximum_absolute_rmse_difference": 0.0,
+    "mean_rmse": {
+      "baseline": 1.0220140337265988,
+      "empirical_prior": 1.021235114719336,
+      "finite_shot_qcbm_prior": 1.0206761535105588,
+      "qcbm_prior": 1.0211049603466156,
+      "random_prior": 1.021300461608334,
+      "shuffled_prior": 1.021372134478136,
+      "uniform_prior": 1.021354475035779
+    }
+  },
+  "qcbm_checkpoint": {
+    "parameters": 216,
+    "numpy_statevector_reconstruction_max_probability_error": 2.0057740190981832e-18,
+    "finite_shots": 8000,
+    "finite_shot_seed": 42,
+    "finite_shot_distribution_matches": true,
+    "retrained_during_verification": false
+  },
+  "protocol_checks": {
+    "passed": 6,
+    "qcbm_training_checkpoint_test": "Not run: Torch and PennyLane are unavailable in verification runtime. Saved QCBM state/distributions verified independently with NumPy."
+  },
+  "input_sha256": {
+    "u.data": "06416e597f82b7342361e41163890c81036900f418ad91315590814211dca490",
+    "u.item": "553841ebc7de3a0fd0d6b62a204ea30c1e651aacfb2814c7a6584ac52f2c5701"
+  },
+  "source_sha256": {
+    "qiml_prior_experiments.py": "451acdc1c04a5f95a61e99ad1eafdcaf9a94b011ec410b9f808e723545892d38",
+    "svd_prior_search.py": "a1a5c445abf6eab1ab9be8d0cabfcd29d561fab0e62a7b557bfdfb69383a0ff6",
+    "train_winning_qprior.py": "ce2aeb294bb2c8cea953b46bc08d2bd305f15b4e8200e11e45d7cf359fe4d6ef",
+    "evaluate_qprior_recommender.py": "e5046284fbc950d77c19b98326ef62a287a283fd469f61404f076b07541ea44a",
+    "rebuild_static_table1_prior.py": "30b3fc41ba041b9d6db90cc2b21cb00b1fc8b2de290f345c96afd091bec99b45"
+  }
+}

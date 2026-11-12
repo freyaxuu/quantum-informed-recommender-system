@@ -1,0 +1,6 @@
+{
+  "user_clusters": 16,
+  "item_clusters": 16,
+  "time_promising": true,
+  "time_scheme": "tod3"
+}

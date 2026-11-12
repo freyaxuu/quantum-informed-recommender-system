@@ -1,0 +1,15 @@
+{
+  "source_metrics": "results/static_v1_corrected/qiml_qprior_confirmation/metrics_with_gains.csv",
+  "primary_endpoint": "test_rmse",
+  "primary_hypothesis": "exact QCBM has lower RMSE than each null control",
+  "primary_test": "exact paired sign-flip test on the mean difference",
+  "multiplicity": "Holm correction across the three controls within each endpoint/family",
+  "qcbm_rmse_beats_all_nulls_one_sided_holm_0p05": true,
+  "qcbm_rmse_beats_all_nulls_two_sided_holm_0p05": true,
+  "qcbm_kl_beats_all_nulls_one_sided_holm_0p05": true,
+  "qcbm_kl_beats_all_nulls_two_sided_holm_0p05": true,
+  "all_6_qcbm_endpoint_control_tests_one_sided_holm_0p05": true,
+  "all_6_qcbm_endpoint_control_tests_two_sided_holm_0p05": false,
+  "all_nulls_beat_baseline_rmse_one_sided_holm_0p05": true,
+  "inference_scope": "Training/null-seed sensitivity on one fixed MovieLens confirmation partition; not population or new-data significance."
+}
